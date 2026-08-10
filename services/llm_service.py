@@ -572,7 +572,7 @@ _LIVE_DATA_KEYWORDS = (
     "earnings", "report date", "when does", "when is",
     "email", "gmail", "inbox", "calendar", "meeting",
     "sec filing", "10-k", "10-q", "8-k", "filing",
-    "remember", "save this", "add to my", "update my",
+    "remember to alert", "remember to notify", "save this", "add to my", "update my",
     "search", "look up", "check", "fetch", "get me",
 )
 
