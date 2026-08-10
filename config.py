@@ -6,16 +6,16 @@ load_dotenv()
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# --- LLM (Groq API by default, or local Ollama) ---
+# --- LLM (Groq API by default, or local Ollama, or OpenRouter) ---
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-# Hybrid mode: the local Ollama model runs the whole tool loop (cheap, no
-# API quota), and Groq is called exactly once at the end just to polish the
-# final phrasing. Use this when your Groq tier can't sustain the per-round
-# tool-schema tokens but you still want high-quality final answers.
+# Hybrid mode: a cheap/fast provider runs the tool loop (no Groq quota),
+# and Groq is called exactly once at the end to polish the final phrasing.
+# Tool-loop provider can be "ollama" or "openrouter".
 LLM_HYBRID_MODE = os.getenv("LLM_HYBRID_MODE", "false").lower() == "true"
+LLM_HYBRID_TOOL_PROVIDER = os.getenv("LLM_HYBRID_TOOL_PROVIDER", "ollama")
 GROQ_POLISH_MODEL = os.getenv("GROQ_POLISH_MODEL", GROQ_MODEL)
 
 # Tool-calling rounds resend the full tool schema + history every round,
@@ -26,6 +26,13 @@ GROQ_POLISH_MODEL = os.getenv("GROQ_POLISH_MODEL", GROQ_MODEL)
 GROQ_TOOL_MODEL = os.getenv("GROQ_TOOL_MODEL", GROQ_MODEL)
 GROQ_TRANSCRIBE_MODEL = os.getenv("GROQ_TRANSCRIBE_MODEL", "whisper-large-v3-turbo")
 
+# --- OpenRouter (for hybrid tool loop) ---
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
+OPENROUTER_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "300"))
+
+# --- Local LLM (used for ALL tool-calling rounds in hybrid mode when provider=ollama) ---
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:3b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 VISION_MODEL = os.getenv("VISION_MODEL", "llama3.2-vision")
@@ -69,11 +76,21 @@ if LLM_PROVIDER == "groq":
 elif LLM_PROVIDER == "ollama":
     if not OLLAMA_BASE_URL:
         raise RuntimeError("OLLAMA_BASE_URL missing in .env (needed when LLM_PROVIDER=ollama)")
+elif LLM_PROVIDER == "openrouter":
+    if not OPENROUTER_API_KEY:
+        print("[WARNING] OPENROUTER_API_KEY missing — LLM responses will not work until set.")
 else:
-    raise RuntimeError(f"Unknown LLM_PROVIDER '{LLM_PROVIDER}'. Use 'groq' or 'ollama'.")
+    raise RuntimeError(f"Unknown LLM_PROVIDER '{LLM_PROVIDER}'. Use 'groq', 'ollama', or 'openrouter'.")
 
-if LLM_HYBRID_MODE and not OLLAMA_BASE_URL:
-    raise RuntimeError("LLM_HYBRID_MODE=true requires OLLAMA_BASE_URL to be set")
+if LLM_HYBRID_MODE:
+    if LLM_HYBRID_TOOL_PROVIDER == "ollama":
+        if not OLLAMA_BASE_URL:
+            raise RuntimeError("LLM_HYBRID_MODE=true with ollama requires OLLAMA_BASE_URL")
+    elif LLM_HYBRID_TOOL_PROVIDER == "openrouter":
+        if not OPENROUTER_API_KEY:
+            raise RuntimeError("LLM_HYBRID_MODE=true with openrouter requires OPENROUTER_API_KEY")
+    else:
+        raise RuntimeError(f"Unknown LLM_HYBRID_TOOL_PROVIDER '{LLM_HYBRID_TOOL_PROVIDER}'. Use 'ollama' or 'openrouter'.")
 
 if not FINNHUB_API_KEY:
     # Not fatal — bot can still run without live financial data, but warn loudly.

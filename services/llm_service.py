@@ -65,6 +65,7 @@ def strip_markdown(text: str) -> str:
 
 OLLAMA_CHAT_URL = f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_CHAT_URL = f"{config.OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 MAX_HISTORY = 8           # recent messages included as LLM context (token budget)
 REQUEST_TIMEOUT = 180     # seconds; bumped from 120 — on this hardware (GTX 1650,
                           # only 13/29 model layers fit in VRAM) generation runs at
@@ -88,6 +89,10 @@ OLLAMA_MAX_TOKENS = 300   # caps the LOCAL DRAFT's length only. Lowered from 500
 # affect the Groq-only path (_groq_tool_loop), which imports its own
 # MAX_TOOL_ROUNDS from financial_data.py.
 OLLAMA_MAX_TOOL_ROUNDS = min(MAX_TOOL_ROUNDS, 3)
+
+# OpenRouter tool-loop settings (used in hybrid mode when LLM_HYBRID_TOOL_PROVIDER=openrouter)
+OPENROUTER_MAX_TOKENS = 300
+OPENROUTER_MAX_TOOL_ROUNDS = min(MAX_TOOL_ROUNDS, 3)
 
 # Tool results are truncated per-call to keep the local model's context small
 # (see _ollama_tool_loop / _groq_tool_loop). The FULL, untruncated results are
@@ -371,6 +376,36 @@ def _ollama_complete(messages: list[dict], tools: list[dict] | None = None) -> d
         logger.warning("Could not run 'ollama ps': %s", exc)
 
     return data["message"]
+
+
+def _openrouter_complete(messages: list[dict], tools: list[dict] | None = None) -> dict:
+    """Call OpenRouter API (OpenAI-compatible) for chat completion."""
+    payload = {
+        "model": config.OPENROUTER_MODEL,
+        "messages": messages,
+        "temperature": TEMPERATURE,
+        "max_tokens": OPENROUTER_MAX_TOKENS,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+
+    headers = {
+        "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/AbhishekPalaskar960/Atlas_Telegram_Bot",
+        "X-Title": "Atlas Financial Assistant",
+    }
+
+    start = time.monotonic()
+    with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+        response = client.post(OPENROUTER_CHAT_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+    elapsed = time.monotonic() - start
+    logger.warning("OpenRouter call took %.1fs (model=%s)", elapsed, config.OPENROUTER_MODEL)
+
+    return data["choices"][0]["message"]
 
 
 _last_groq_call_ts = 0.0
@@ -751,6 +786,86 @@ def _ollama_tool_loop(
     return draft, tool_results, no_data_declared
 
 
+def _openrouter_tool_loop(
+    session: Session, user: User, messages: list[dict], user_text: str = ""
+) -> tuple[str, list[dict], bool]:
+    """Chat loop for OpenRouter: execute requested tools until a final answer arrives.
+
+    Mirrors the Ollama loop: handles native tool_calls AND text-tag function
+    calls, only sends the schemas relevant to the message, and truncates
+    large tool results to hold the DRAFT model's context budget.
+
+    Returns (draft_text, tool_results, no_data_declared). tool_results is a list of
+    {"name", "args", "result"} dicts — one per REAL tool call made during the
+    loop, with the FULL, untruncated result — so callers can (a) hand real
+    data to the polish step instead of just the local draft, and (b) detect
+    whether the underlying data actually came back OK before trusting
+    anything the draft claims (see _draft_is_unverified / _call_llm).
+    no_data_declared is True iff the model explicitly called the dummy
+    `no_data_needed` tool, signalling that no live data is required for
+    this question. If neither real tools ran nor this flag is set, the
+    model silently skipped grounding — the guardrail treats that as unverified.
+
+    NOTE: OpenRouter uses OpenAI-compatible tool calling format with tool_call_id,
+    so the resulting messages CAN be forwarded to Groq for polishing without
+    the 400 Bad Request issue that Ollama has.
+    """
+    base_tools = list(ALL_TOOLS) if not user_text else _select_tools(user_text)
+    tools_for_call = [*base_tools, NO_DATA_NEEDED_TOOL]
+    tool_results: list[dict] = []
+    no_data_declared = False
+
+    for _ in range(OPENROUTER_MAX_TOOL_ROUNDS):
+        message = _openrouter_complete(messages, tools=tools_for_call)
+        content = message.get("content") or ""
+        tool_calls = message.get("tool_calls") or []
+
+        if not tool_calls:
+            call = extract_function_call(content)
+            if call is None:
+                return strip_function_tags(content) or LLM_OFFLINE_REPLY, tool_results, no_data_declared
+            messages.append({"role": "assistant", "content": strip_function_tags(content)})
+            name = call["name"]
+            args = call["arguments"]
+            if name == "no_data_needed":
+                no_data_declared = True
+                continue
+            result = _execute_tool(session, user, name, args)
+            logger.info("OpenRouter text-tag tool call executed: %s(%s)", name, args)
+            tool_results.append({"name": name, "args": args, "result": result})
+            truncated = result
+            if len(truncated) > TOOL_RESULT_TRUNCATE_FOR_DRAFT:
+                truncated = truncated[:TOOL_RESULT_TRUNCATE_FOR_DRAFT] + "... [truncated]"
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"The result of {name}({args}) was:\n{truncated}\n\n"
+                        "Answer the user's question using this data. If the data "
+                        "is an error or unavailable, say so plainly."
+                    ),
+                }
+            )
+            continue
+
+        messages.append(message)
+        for call in tool_calls:
+            name = call["function"]["name"]
+            if name == "no_data_needed":
+                no_data_declared = True
+                continue
+            args = _parse_tool_args(call)
+            result = _execute_tool(session, user, name, args)
+            tool_results.append({"name": name, "args": args, "result": result})
+            truncated = result
+            if len(truncated) > TOOL_RESULT_TRUNCATE_FOR_DRAFT:
+                truncated = truncated[:TOOL_RESULT_TRUNCATE_FOR_DRAFT] + "... [truncated]"
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": truncated})
+
+    draft = strip_function_tags(messages[-1].get("content") or "") or LLM_OFFLINE_REPLY
+    return draft, tool_results, no_data_declared
+
+
 def _is_error_result(result: str) -> bool:
     return str(result).strip().upper().startswith("ERROR")
 
@@ -906,7 +1021,7 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
         needs_live = _needs_live_data(user_text)
         is_conv = _is_conversational(user_text)
 
-        # --- Fast Groq path (no Ollama, no tools) ---
+        # --- Fast Groq path (no tool loop, no tools) ---
         # Used when: (a) file data is already in context, OR (b) message is short/
         # conversational — as long as no live data tool is needed.
         # Falls back to the hybrid path if Groq fails (e.g. 429 quota exhausted).
@@ -940,18 +1055,21 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
                 return strip_markdown(strip_function_tags(reply.get("content") or "")) or LLM_OFFLINE_REPLY
             except Exception as exc:
                 logger.warning(
-                    "Fast Groq path failed for user %s (%s), falling back to Ollama hybrid.", user.id, exc
+                    "Fast Groq path failed for user %s (%s), falling back to hybrid tool loop.", user.id, exc
                 )
-                # Fall through to the normal Ollama + Groq hybrid path below.
+                # Fall through to the normal hybrid path below.
 
-        # --- Normal hybrid path: Ollama tool loop → Groq polish ---
+        # --- Normal hybrid path: tool loop (Ollama or OpenRouter) → Groq polish ---
         # Used when live data is needed (stock price, alert, news, etc.)
         # or the fast Groq path failed.
-        # Automatic fallback: if Ollama is unreachable (e.g. Railway deployment
-        # without a local Ollama service), we silently fall back to Groq tool loop.
+        # Automatic fallback: if tool provider is unreachable, fall back to Groq tool loop.
+        tool_provider = config.LLM_HYBRID_TOOL_PROVIDER
         try:
             clean_messages = list(messages)  # snapshot BEFORE the tool loop mutates `messages`
-            draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
+            if tool_provider == "openrouter":
+                draft, tool_results, no_data_declared = _openrouter_tool_loop(session, user, messages, user_text=user_text)
+            else:  # ollama (default)
+                draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
             if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
                 logger.warning(
                     "Draft unverified (no tool ran, no no_data_needed call) for user %s — "
@@ -963,12 +1081,23 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
             return _polish_with_groq(clean_messages, draft, tool_results=tool_results)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
             logger.warning(
-                "Ollama unreachable for user %s (%s) — falling back to Groq tool loop.",
-                user.id, exc,
+                "%s unreachable for user %s (%s) — falling back to Groq tool loop.",
+                tool_provider.capitalize(), user.id, exc,
             )
             return _groq_tool_loop(session, user, messages, user_text=user_text)
     if config.LLM_PROVIDER == "groq":
         return _groq_tool_loop(session, user, messages, user_text=user_text)
+    if config.LLM_PROVIDER == "openrouter":
+        # Direct OpenRouter mode (non-hybrid): tool loop on OpenRouter, no Groq polish
+        draft, tool_results, no_data_declared = _openrouter_tool_loop(session, user, messages, user_text=user_text)
+        has_file_context = any(
+            m.get("role") == "system"
+            and ("[Document: " in m.get("content", "") or "[Spreadsheet: " in m.get("content", ""))
+            for m in messages
+        )
+        if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
+            return _data_unavailable_reply(tool_results)
+        return draft
     draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
     has_file_context = any(
         m.get("role") == "system"
@@ -984,6 +1113,8 @@ def _call_llm_plain(messages: list[dict]) -> str:
     """Structured/simple path (e.g. profile extraction) — no tools, raw content."""
     if config.LLM_PROVIDER == "groq":
         return _groq_complete(messages).get("content", "").strip()
+    if config.LLM_PROVIDER == "openrouter":
+        return _openrouter_complete(messages).get("content", "").strip()
     return _ollama_complete(messages).get("content", "").strip()
 
 
