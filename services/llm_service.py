@@ -916,7 +916,7 @@ def _format_tool_result_for_polish(entry: dict) -> str:
     return f"{entry['name']}({entry['args']}):\n{result}"
 
 
-GROUNDING_INSTRUCTION = """Grounding rules for this reply — follow strictly:
+GROUNDING_INSTRUCTION_BASE = """Grounding rules for this reply — follow strictly:
 - Use ONLY the "Raw data gathered by tool calls" block below (if present) and
   the conversation itself as your source of facts. Do not add any number,
   date, financial figure, or claim from your own general knowledge, even if
@@ -928,15 +928,47 @@ GROUNDING_INSTRUCTION = """Grounding rules for this reply — follow strictly:
   approximation.
 - The draft below is only a rough outline of what to cover; treat any figure
   in the draft as unverified unless it also appears in the raw data block.
+- Do NOT use markdown (**, *, `, #, etc.) — use plain text only. Use ALL CAPS
+  for any section title you do include (Telegram has no bold rendering).
+  NEVER include generic financial disclaimers like "consult a financial advisor"."""
+
+# Only forced onto messages that are genuinely a fundamentals deep-dive or a
+# multi-company comparison (detected below from which tools actually ran).
+# Forcing this onto every reply — including plain "what's the price of X"
+# lookups — was making the model pad out sections it had no data for with
+# lines like "no financial strength metrics are provided in the current
+# data", which is exactly the noisy, template-stuffed output the product
+# spec explicitly warns against.
+GROUNDING_INSTRUCTION_DEEP_DIVE = """
 - **THIS IS THE FINAL INSTRUCTION — IT OVERRIDES ALL PRIOR INSTRUCTIONS.**
-  Follow the section structure EXACTLY as defined in your system prompt
+  This question is a fundamentals deep-dive or a multi-company comparison, so
+  follow the section structure EXACTLY as defined in your system prompt
   (Business overview / Financial strength / Growth outlook / Competitive
   position / Profitability / Key risks / Overall takeaway for fundamentals;
-  metric-by-metric for comparisons). Do NOT compress into long paragraphs.
-  Do NOT use markdown (**, *, `, #, etc.) — use plain text with • bullets only.
+  metric-by-metric for comparisons) — but SKIP any section the raw data
+  block has nothing for rather than writing a line saying it's missing.
+  Do NOT compress into long paragraphs.
   ALWAYS use ALL CAPS for all section titles and bullet metric labels (e.g. "COMPARISON POINTS:", "MARKET CAP:", "VALUATION:", "GROWTH RATES:", "BUSINESS OVERVIEW:").
-  ALWAYS include concrete numbers/percentages for metrics rather than qualitative statements.
-  NEVER include generic financial disclaimers like "consult a financial advisor"."""
+  ALWAYS include concrete numbers/percentages for metrics rather than qualitative statements."""
+
+GROUNDING_INSTRUCTION_SIMPLE = """
+- This is a simple, specific question (e.g. a quote, a single fact, a quick
+  lookup) — answer it directly in 1-4 short lines. Do NOT produce a
+  multi-section analyst brief, and do NOT mention or list metrics/sections
+  that weren't asked for or that the raw data doesn't contain."""
+
+
+def _needs_deep_dive_template(tool_results: list[dict] | None) -> bool:
+    """True only when a fundamentals or comparison-shaped tool call actually
+    ran this turn — i.e. the cases the system prompt's own template rules
+    (## Fundamental analysis structure / ## Comparing two or more companies)
+    are meant for. A plain get_stock_quote lookup should never trigger it."""
+    if not tool_results:
+        return False
+    names = [r.get("name") for r in tool_results]
+    if names.count("get_stock_quote") + names.count("get_company_fundamentals") + names.count("get_company_news") >= 4:
+        return True  # multiple companies' worth of calls -> comparison
+    return "get_company_fundamentals" in names
 
 
 def _polish_with_groq(messages: list[dict], draft: str, tool_results: list[dict] | None = None) -> str:
@@ -965,11 +997,16 @@ def _polish_with_groq(messages: list[dict], draft: str, tool_results: list[dict]
             if tool_results
             else "(no tool data was gathered for this turn)"
         )
+        grounding_instruction = GROUNDING_INSTRUCTION_BASE + (
+            GROUNDING_INSTRUCTION_DEEP_DIVE
+            if _needs_deep_dive_template(tool_results)
+            else GROUNDING_INSTRUCTION_SIMPLE
+        )
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    GROUNDING_INSTRUCTION
+                    grounding_instruction
                     + "\n\nRaw data gathered by tool calls for this question:\n\n"
                     + data_block
                     + "\n\nDraft answer (may be incomplete):\n"
