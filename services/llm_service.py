@@ -591,20 +591,18 @@ _CONVERSATIONAL_SIGNALS = (
     "hello", "hi ", "hey ", "thanks", "thank you", "ok", "okay", "sure",
     "yes", "no", "got it", "sounds good", "great", "nice",
     "what can you", "who are you", "what are you",
+    "my watchlist", "remember that", "add to my", "update my", "set my"
 )
-
 
 def _is_conversational(user_text: str) -> bool:
     """Return True when the message is short/casual and unlikely to need tool
     data or heavy file analysis — route these straight to Groq for speed."""
     text = user_text.lower().strip()
-    # Explicit conversational openers
     if any(text.startswith(sig) or sig in text for sig in _CONVERSATIONAL_SIGNALS):
         return True
-    # Short messages with no analysis keywords are usually conversational
     analysis_kw = ("analyze", "analysis", "compare", "comparison", "explain",
                    "fundamentals", "breakdown", "extract", "summarize", "summary")
-    if len(text) < 120 and not any(kw in text for kw in analysis_kw):
+    if len(text) < 200 and not any(kw in text for kw in analysis_kw):
         return True
     return False
 
