@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  ollama:
+    build:
+      context: ./ollama-service
+      dockerfile: Dockerfile
+    container_name: atlas-ollama
+    environment:
+      - OLLAMA_MODEL=qwen2.5:7b
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  ollama_data:

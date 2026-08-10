@@ -947,17 +947,26 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
         # --- Normal hybrid path: Ollama tool loop → Groq polish ---
         # Used when live data is needed (stock price, alert, news, etc.)
         # or the fast Groq path failed.
-        clean_messages = list(messages)  # snapshot BEFORE the tool loop mutates `messages`
-        draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
-        if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
+        # Automatic fallback: if Ollama is unreachable (e.g. Railway deployment
+        # without a local Ollama service), we silently fall back to Groq tool loop.
+        try:
+            clean_messages = list(messages)  # snapshot BEFORE the tool loop mutates `messages`
+            draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
+            if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
+                logger.warning(
+                    "Draft unverified (no tool ran, no no_data_needed call) for user %s — "
+                    "returning honest unavailable reply instead of polishing: %r",
+                    user.id,
+                    draft[:200],
+                )
+                return _data_unavailable_reply(tool_results)
+            return _polish_with_groq(clean_messages, draft, tool_results=tool_results)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
             logger.warning(
-                "Draft unverified (no tool ran, no no_data_needed call) for user %s — "
-                "returning honest unavailable reply instead of polishing: %r",
-                user.id,
-                draft[:200],
+                "Ollama unreachable for user %s (%s) — falling back to Groq tool loop.",
+                user.id, exc,
             )
-            return _data_unavailable_reply(tool_results)
-        return _polish_with_groq(clean_messages, draft, tool_results=tool_results)
+            return _groq_tool_loop(session, user, messages, user_text=user_text)
     if config.LLM_PROVIDER == "groq":
         return _groq_tool_loop(session, user, messages, user_text=user_text)
     draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
