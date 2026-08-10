@@ -1126,7 +1126,7 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
                 draft, tool_results, no_data_declared = _openrouter_tool_loop(session, user, messages, user_text=user_text)
             else:  # ollama (default)
                 draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
-            if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
+            if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context and not (is_conv and not needs_live):
                 logger.warning(
                     "Draft unverified (no tool ran, no no_data_needed call) for user %s — "
                     "returning honest unavailable reply instead of polishing: %r",
@@ -1151,7 +1151,9 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
             and ("[Document: " in m.get("content", "") or "[Spreadsheet: " in m.get("content", ""))
             for m in messages
         )
-        if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
+        needs_live = _needs_live_data(user_text)
+        is_conv = _is_conversational(user_text)
+        if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context and not (is_conv and not needs_live):
             return _data_unavailable_reply(tool_results)
         return draft
     draft, tool_results, no_data_declared = _ollama_tool_loop(session, user, messages, user_text=user_text)
@@ -1160,7 +1162,9 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
         and ("[Document: " in m.get("content", "") or "[Spreadsheet: " in m.get("content", ""))
         for m in messages
     )
-    if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context:
+    needs_live = _needs_live_data(user_text)
+    is_conv = _is_conversational(user_text)
+    if _draft_is_unverified(tool_results, no_data_declared) and not has_file_context and not (is_conv and not needs_live):
         return _data_unavailable_reply(tool_results)
     return draft
 
