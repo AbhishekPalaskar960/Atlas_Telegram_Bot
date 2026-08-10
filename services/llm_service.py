@@ -1087,24 +1087,33 @@ def _call_llm(session: Session, user: User, messages: list[dict], user_text: str
                 user.id, has_file_context, is_conv,
             )
             try:
+                system_content = []
+                if has_file_context:
+                    system_content.append(
+                        "IMPORTANT: The full text of every uploaded document or spreadsheet is "
+                        "already embedded in the system messages above (look for blocks starting "
+                        "with [Document: ...] or [Spreadsheet: ...]). You have complete access to "
+                        "all the content. Do NOT say you cannot read or access the file. "
+                        "Answer the user's question using ONLY that embedded content (if relevant)."
+                    )
+                else:
+                    system_content.append("Answer the user's conversational question directly and concisely.")
+                
+                system_content.append(
+                    "Do NOT use markdown (**, *, #). "
+                    "Do NOT write intro/preamble sentences like 'Here are...' or 'The following...'. "
+                    "Use ALL CAPS for every section/metric header (e.g. REVENUE GROWTH:, P/E RATIO:). "
+                    "When listing values for multiple companies under a metric, put EACH company "
+                    "on its OWN separate bullet line (e.g. '• NVDA: 70.7%' then newline '• MSFT: 17.8%'), "
+                    "NOT all companies crammed into a single comma-separated line. "
+                    "Include concrete numbers and percentages where applicable. "
+                    "Never say 'consult a financial advisor'."
+                )
+
                 fast_messages = list(messages) + [
                     {
                         "role": "system",
-                        "content": (
-                            "IMPORTANT: The full text of every uploaded document or spreadsheet is "
-                            "already embedded in the system messages above (look for blocks starting "
-                            "with [Document: ...] or [Spreadsheet: ...]). You have complete access to "
-                            "all the content. Do NOT say you cannot read or access the file. "
-                            "Answer the user's question using ONLY that embedded content (if relevant). "
-                            "Do NOT use markdown (**, *, #). "
-                            "Do NOT write intro/preamble sentences like 'Here are...' or 'The following...'. "
-                            "Use ALL CAPS for every section/metric header (e.g. REVENUE GROWTH:, P/E RATIO:). "
-                            "When listing values for multiple companies under a metric, put EACH company "
-                            "on its OWN separate bullet line (e.g. '\u2022 NVDA: 70.7%' then newline '\u2022 MSFT: 17.8%'), "
-                            "NOT all companies crammed into a single comma-separated line. "
-                            "Include concrete numbers and percentages where applicable. "
-                            "Never say 'consult a financial advisor'. Answer the question directly and concisely."
-                        ),
+                        "content": " ".join(system_content),
                     }
                 ]
                 reply = _groq_complete(fast_messages, tools=None, model=config.GROQ_MODEL)
