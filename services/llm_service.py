@@ -91,7 +91,7 @@ OLLAMA_MAX_TOKENS = 300   # caps the LOCAL DRAFT's length only. Lowered from 500
 OLLAMA_MAX_TOOL_ROUNDS = min(MAX_TOOL_ROUNDS, 3)
 
 # OpenRouter tool-loop settings (used in hybrid mode when LLM_HYBRID_TOOL_PROVIDER=openrouter)
-OPENROUTER_MAX_TOKENS = 300
+OPENROUTER_MAX_TOKENS = config.OPENROUTER_MAX_TOKENS
 OPENROUTER_MAX_TOOL_ROUNDS = min(MAX_TOOL_ROUNDS, 3)
 
 # Comparison-query detection — bump tool-loop rounds when user explicitly
