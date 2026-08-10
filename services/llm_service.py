@@ -94,6 +94,22 @@ OLLAMA_MAX_TOOL_ROUNDS = min(MAX_TOOL_ROUNDS, 3)
 OPENROUTER_MAX_TOKENS = 300
 OPENROUTER_MAX_TOOL_ROUNDS = min(MAX_TOOL_ROUNDS, 3)
 
+# Comparison-query detection — bump tool-loop rounds when user explicitly
+# asks to compare multiple companies. Weak local models (7B) often emit
+# only ONE tool call per round, so N companies needs ~2*N rounds to gather
+# quote + fundamentals + news for each, plus a final synthesis round.
+_COMPARISON_SIGNAL_RE = re.compile(r"\bcompare\b|\bvs\.?\b|\bversus\b", re.IGNORECASE)
+
+
+def _estimate_tool_rounds(user_text: str, base_rounds: int) -> int:
+    if not user_text or not _COMPARISON_SIGNAL_RE.search(user_text):
+        return base_rounds
+    candidates = re.findall(r"\b[A-Z][A-Za-z.]{1,}\b", user_text)
+    stopwords = {"I", "The", "Which", "What", "Compare", "Based", "One", "Has"}
+    entities = {c for c in candidates if c not in stopwords}
+    company_count = max(2, min(len(entities), 5))
+    return max(base_rounds, min(company_count * 2 + 1, 8))
+
 # Tool results are truncated per-call to keep the local model's context small
 # (see _ollama_tool_loop / _groq_tool_loop). The FULL, untruncated results are
 # separately kept in `tool_results` and handed to the Groq polish step, whose
@@ -735,7 +751,8 @@ def _ollama_tool_loop(
     tool_results: list[dict] = []
     no_data_declared = False
 
-    for _ in range(OLLAMA_MAX_TOOL_ROUNDS):
+    rounds = _estimate_tool_rounds(user_text, OLLAMA_MAX_TOOL_ROUNDS) + 1
+    for _ in range(rounds):
         message = _ollama_complete(messages, tools=tools_for_call)
         content = message.get("content") or ""
         tool_calls = message.get("tool_calls") or []
@@ -815,7 +832,8 @@ def _openrouter_tool_loop(
     tool_results: list[dict] = []
     no_data_declared = False
 
-    for _ in range(OPENROUTER_MAX_TOOL_ROUNDS):
+    rounds = _estimate_tool_rounds(user_text, OPENROUTER_MAX_TOOL_ROUNDS) + 1
+    for _ in range(rounds):
         message = _openrouter_complete(messages, tools=tools_for_call)
         content = message.get("content") or ""
         tool_calls = message.get("tool_calls") or []
