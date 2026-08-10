@@ -574,6 +574,7 @@ _LIVE_DATA_KEYWORDS = (
     "sec filing", "10-k", "10-q", "8-k", "filing",
     "remember to alert", "remember to notify", "save this", "add to my", "update my",
     "search", "look up", "check", "fetch", "get me",
+    "briefing", "watchlist update", "portfolio update",
 )
 
 
