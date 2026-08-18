@@ -81,6 +81,6 @@ jobs:
 
 Switch to lighter model in Space Settings → Variables:
 ```
-OLLAMA_MODEL=llama3.2:3b
+OLLAMA_MODEL=llama3.2:1b
 ```
 Then rebuild Space.

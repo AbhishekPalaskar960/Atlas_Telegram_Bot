@@ -15,7 +15,7 @@ Separate Ollama service for hybrid mode: local LLM runs tool loop, Groq polishes
    ```
    OLLAMA_MODEL=qwen2.5:7b
    ```
-   *Optional: `llama3.2:3b` for lower RAM (~3.5GB vs ~5GB)*
+   *Optional: `llama3.2:1b` for lower RAM (~1.5GB vs ~5GB)*
 
 4. **Deploy** → Wait for build + model pull (~5-10 min first deploy)
 
@@ -36,7 +36,7 @@ Redeploy Atlas bot.
 
 ## Notes
 
-- **RAM:** `qwen2.5:7b` needs ~5GB. Railway free tier (512MB) **will crash**. Use paid plan ($5/mo for 1GB+) or `llama3.2:3b` (~3.5GB).
+- **RAM:** `qwen2.5:7b` needs ~5GB. Railway free tier (512MB) **will crash**. Use paid plan ($5/mo for 1GB+) or `llama3.2:1b` (~1.5GB).
 - **Cold starts:** First request after idle spins up — expect 10-30s delay.
 - **Volume persistence:** Railway doesn't persist `/root/.ollama` across deploys by default. Model re-pulls each deploy. For production, attach Railway Volume → mount to `/root/.ollama`.
 - **Healthcheck:** Add `/api/tags` endpoint check for Railway healthchecks.

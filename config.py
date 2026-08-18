@@ -33,9 +33,9 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
 OPENROUTER_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "1500"))
 
 # --- Local LLM (used for ALL tool-calling rounds in hybrid mode when provider=ollama) ---
-LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:3b")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-VISION_MODEL = os.getenv("VISION_MODEL", "llama3.2-vision")
+VISION_MODEL = os.getenv("VISION_MODEL", "llama3.2-vision:latest")
 
 # --- Financial data ---
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")

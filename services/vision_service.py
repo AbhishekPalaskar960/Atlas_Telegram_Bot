@@ -11,7 +11,7 @@ REQUEST_TIMEOUT = 120
 
 VISION_MODEL_UNAVAILABLE = (
     "I can't analyze images right now — no vision model is installed. "
-    "If you'd like chart/photo analysis, run `ollama pull llama3.2-vision` once, "
+    "If you'd like chart/photo analysis, run `ollama pull llama3.2-vision:latest` once, "
     "and I'll use it."
 )
 
