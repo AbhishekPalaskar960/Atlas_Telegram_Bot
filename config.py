@@ -9,14 +9,14 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # --- LLM (Groq API by default, or local Ollama, or OpenRouter) ---
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # Hybrid mode: a cheap/fast provider runs the tool loop (no Groq quota),
 # and Groq is called exactly once at the end to polish the final phrasing.
 # Tool-loop provider can be "ollama" or "openrouter".
 LLM_HYBRID_MODE = os.getenv("LLM_HYBRID_MODE", "false").lower() == "true"
 LLM_HYBRID_TOOL_PROVIDER = os.getenv("LLM_HYBRID_TOOL_PROVIDER", "ollama")
-GROQ_POLISH_MODEL = os.getenv("GROQ_POLISH_MODEL", "llama-3.1-70b-versatile")
+GROQ_POLISH_MODEL = os.getenv("GROQ_POLISH_MODEL", "llama-3.1-8b-instant")
 
 # Tool-calling rounds resend the full tool schema + history every round,
 # which is the main token cost driving TPM 429s. Use a lighter/cheaper
